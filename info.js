@@ -7,16 +7,43 @@
  * 빌드 도구 없이 <script src="info.js"></script> 로 그대로 로드해서 쓸 수
  * 있도록 작성되었습니다 (모듈 문법 없음, 전역 함수로 노출).
  *
- * 세 함수 모두 "동기" 함수이며, 실패하더라도 예외를 던지지 않고 안전한
- * 기본값을 채워 항상 유효한 객체를 반환합니다(카드 렌더링이 절대 깨지지
- * 않도록 하기 위함).
+ * getTimeInfo(), getEnvironmentInfo()는 "동기" 함수입니다.
+ *
+ * ⚠️ getDeviceInfo(stream)는 "비동기(async)" 함수입니다. 정확한 기종명을
+ * 얻으려면 User-Agent Client Hints API를 호출해야 하는데 이 API가 Promise
+ * 기반이라, 기존에 동기 함수였던 것을 async로 바꿨습니다(프로젝트 문서
+ * 10번 항목에서 이미 이렇게 합의된 내용과 동일한 형태로 맞췄습니다).
+ * 호출하는 쪽에서는 `const info = await getDeviceInfo(stream);` 또는
+ * `getDeviceInfo(stream).then(info => {...})` 형태로 받아야 합니다.
+ *
+ * 모든 함수는 실패하더라도 예외를 던지지 않고 안전한 기본값을 채워 항상
+ * 유효한 객체를 반환합니다(카드 렌더링이 절대 깨지지 않도록 하기 위함).
  *
  * 공개 API
  *   - getTimeInfo(): { timestamp, displayTime, isDaytime }
- *   - getDeviceInfo(stream): { platformLabel, resolution, facingMode }
+ *   - getDeviceInfo(stream): Promise<{ platformLabel, modelLabel, resolution, facingMode }>
  *   - getEnvironmentInfo(canvas, tiltAngleDeg): { orientation, brightnessLevel, brightnessValue, tiltDescription }
  *
  * 범위에서 제외된 것: 지면으로부터의 높이, GPS 위치 정보 (정확도 문제로 제외)
+ *
+ * ⚠️ 기종(modelLabel)에 대한 중요한 제약사항
+ *   - iOS/Safari: Apple이 개인정보 보호 정책상 웹에 정확한 기종명을 절대
+ *     노출하지 않습니다("iPhone"까지만 알 수 있고 "iPhone 15 Pro" 같은
+ *     구체적인 모델명은 어떤 JS API로도 얻을 수 없습니다). 우회 방법 없음
+ *     → iOS에서는 modelLabel이 항상 null입니다.
+ *   - Android/Chrome: 최신 Chrome(대략 110+ 버전)은 "User-Agent Reduction"
+ *     정책으로 기본 navigator.userAgent에서 기종명을 "K" 같은 임의 값으로
+ *     감춰서, platformLabel이 "Android / Chrome"으로만 보이는 게 원인이었습니다.
+ *     이를 보완하기 위해 1) navigator.userAgent에서 best-effort로 먼저
+ *     추출을 시도하고(일부 기기·브라우저는 아직 축소되지 않은 UA를 보냄),
+ *     2) User-Agent Client Hints API(navigator.userAgentData.getHighEntropyValues)
+ *     가 있으면 그 결과로 덮어써서 더 정확한 값을 우선 사용합니다.
+ *     Client Hints는 Chrome/Edge/Samsung Internet 등 Chromium 계열에서만
+ *     지원되고, Firefox에서는 API 자체가 없어 UA 기반 값(있으면)이나
+ *     null로 남습니다.
+ *   - 삼성 등 일부 제조사는 "Galaxy S23" 같은 마케팅명이 아니라
+ *     "SM-S911N" 같은 내부 모델코드를 반환하는 경우가 많습니다. 이번
+ *     범위에서는 코드→마케팅명 매핑 없이 받은 값을 그대로 노출합니다.
  * ------------------------------------------------------------------------
  */
 
@@ -72,17 +99,72 @@ function _detectPlatformLabel() {
 }
 
 /**
+ * navigator.userAgent 문자열에서 기종명을 최선을 다해(best-effort) 동기적으로
+ * 추출합니다. 예: "Mozilla/5.0 (Linux; Android 13; SM-S911N) ..." -> "SM-S911N"
+ *
+ * 최신 Chrome은 User-Agent Reduction 정책 때문에 이 값이 실제 기종명 대신
+ * 임의 placeholder("K")로 나오는 경우가 많습니다 — 이때는 null을 반환하며,
+ * getDeviceInfo()가 이어서 Client Hints로 재시도합니다. iOS는 애초에 UA에
+ * 기종명이 들어가지 않으므로 항상 null입니다.
+ *
+ * @returns {string|null}
+ */
+function _extractModelFromUserAgent() {
+  var ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  var match = ua.match(/Android\s*[\d.]*;\s*([^)]+)\)/i);
+  if (!match || !match[1]) return null;
+
+  var raw = match[1].split('Build/')[0].trim();
+  // Chrome 축소된 UA의 placeholder("K") 등 의미 없는 값은 걸러냄
+  if (!raw || /^k$/i.test(raw) || /^wv$/i.test(raw)) return null;
+
+  return raw;
+}
+
+/**
+ * User-Agent Client Hints API로 정확한 기종명을 비동기로 조회합니다.
+ * Chrome/Edge/Samsung Internet 등 Chromium 계열 브라우저에서만 동작하고,
+ * 그 외(Safari, Firefox 등)에서는 API 자체가 없어 null을 반환합니다.
+ *
+ * @returns {Promise<string|null>}
+ */
+async function _getModelFromClientHints() {
+  try {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.userAgentData ||
+      typeof navigator.userAgentData.getHighEntropyValues !== 'function'
+    ) {
+      return null;
+    }
+    var values = await navigator.userAgentData.getHighEntropyValues(['model']);
+    return values && values.model ? values.model : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
  * 촬영에 사용된 MediaStream을 바탕으로 기기 정보를 반환합니다.
  * stream이 없거나 트랙 정보를 읽을 수 없어도 예외를 던지지 않고
  * 안전한 기본값을 채워 반환합니다.
  *
+ * ⚠️ 비동기 함수입니다 — 반드시 await 하거나 .then()으로 받으세요.
+ *
+ * modelLabel 계산 순서: 1) navigator.userAgent에서 best-effort로 먼저
+ * 추출 시도 → 2) User-Agent Client Hints가 지원되면 그 결과로 덮어써서
+ * 더 정확한 값을 우선 사용. 둘 다 실패하면 null(기종을 알 수 없음 —
+ * UI에서는 이 경우 기종 표기를 생략하고 platformLabel만 보여주는 것을
+ * 권장).
+ *
  * @param {MediaStream} stream - getUserMedia로 받은 스트림
- * @returns {{platformLabel:string, resolution:string, facingMode:string}}
+ * @returns {Promise<{platformLabel:string, modelLabel:(string|null), resolution:string, facingMode:string}>}
  */
-function getDeviceInfo(stream) {
+async function getDeviceInfo(stream) {
   var platformLabel = _detectPlatformLabel();
   var resolution = 'Unknown';
   var facingMode = 'unknown';
+  var modelLabel = _extractModelFromUserAgent();
 
   try {
     var videoTracks =
@@ -102,8 +184,14 @@ function getDeviceInfo(stream) {
     // 스트림 정보를 못 읽어도 카드 자체는 항상 렌더링될 수 있도록 기본값 유지
   }
 
+  var clientHintModel = await _getModelFromClientHints();
+  if (clientHintModel) {
+    modelLabel = clientHintModel; // Client Hints가 있으면 UA 추출값보다 신뢰도가 높음
+  }
+
   return {
     platformLabel: platformLabel,
+    modelLabel: modelLabel,
     resolution: resolution,
     facingMode: facingMode,
   };
