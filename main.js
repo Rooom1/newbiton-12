@@ -6,14 +6,19 @@
  *
  * 왜곡 점수(distortion.js) 기능은 실제 환경에서 동작하지 않아 제거되었고,
  * 대신 촬영 직후 촬영 시간/기기 정보/촬영 환경을 보여주는 info.js로 대체되었다.
- * info.js의 세 함수(getTimeInfo, getDeviceInfo, getEnvironmentInfo)는 모두
- * 동기 함수이므로 별도의 "분석 중" 로딩 상태가 필요 없다.
+ * info.js의 getDeviceInfo()는 비동기 함수라 fillInfoPanel/handleCapture도 async로 처리한다.
+ *
+ * 흐름: 시작 화면 → (촬영 시작 클릭) → 카메라 초기화 + 기울기 모니터링 시작
+ *       → 촬영 → 결과 화면(시간/기기/촬영환경 카드) → 저장(누적 목록에 추가) 또는 다시 촬영
  */
 
 (function () {
   'use strict';
 
   // ---------- DOM 참조 ----------
+  const startScreen = document.getElementById('start-screen');
+  const startBtn = document.getElementById('start-btn');
+
   const videoEl = document.getElementById('camera-preview');
   const tiltWarningEl = document.getElementById('tilt-warning');
   const tiltWarningTextEl = document.getElementById('tilt-warning-text');
@@ -33,10 +38,25 @@
   const infoEnvironmentEl = document.getElementById('info-environment');
   const retakeBtn = document.getElementById('retake-btn');
 
+  const saveBtn = document.getElementById('save-btn');
+  const historyListEl = document.getElementById('history-list');
+  const historyCountEl = document.getElementById('history-count');
+
   // ---------- 상태 ----------
   let latestIsSafe = false;
   let latestTiltAngle = 90; // camera.js가 보내주는 최신 기울기 각도(도)
   let currentStream = null; // getDeviceInfo(stream)에 넘길 현재 카메라 스트림
+
+  let latestCaptureRecord = null; // 방금 찍은 사진의 저장 대기 중인 정보
+  let savedCaptures = []; // 저장 버튼을 눌러 확정된 촬영 기록 목록
+
+  // ---------- 시작 화면 ----------
+  async function handleStart() {
+    startBtn.disabled = true;
+    startScreen.hidden = true;
+    cameraScreen.hidden = false;
+    await init(); // 이 시점에 카메라 권한 요청 + 기울기 모니터링 시작
+  }
 
   // ---------- 기울기 UI 갱신 ----------
   function handleTiltUpdate(angleDeg, isSafe) {
@@ -100,22 +120,22 @@
 
   // ---------- 촬영 ----------
   async function handleCapture() {
-  if (captureBtn.disabled) return;
+    if (captureBtn.disabled) return;
 
-  captureBtn.disabled = true;
+    captureBtn.disabled = true;
 
-  let dataUrl, canvas;
-  try {
-    ({ dataUrl, canvas } = capturePhoto(videoEl));
-  } catch (err) {
-    console.error('촬영 실패:', err);
-    captureBtn.disabled = !latestIsSafe;
-    return;
+    let dataUrl, canvas;
+    try {
+      ({ dataUrl, canvas } = capturePhoto(videoEl));
+    } catch (err) {
+      console.error('촬영 실패:', err);
+      captureBtn.disabled = !latestIsSafe;
+      return;
+    }
+
+    showResultScreen(dataUrl);
+    await fillInfoPanel(canvas, dataUrl);
   }
-
-  showResultScreen(dataUrl);
-  await fillInfoPanel(canvas); // ← await 추가 (필수는 아니지만 흐름이 명확해짐)
-}
 
   function showResultScreen(dataUrl) {
     resultPhotoEl.src = dataUrl;
@@ -125,32 +145,43 @@
     resultScreen.hidden = false;
   }
 
-  // info.js의 세 함수는 모두 동기 함수라 로딩 스피너 없이 바로 결과를 채운다.
-  async function fillInfoPanel(canvas) {
-  try {
-    const timeInfo = getTimeInfo();
-    infoTimeEl.textContent = formatTimeInfo(timeInfo);
-  } catch (err) {
-    console.error('촬영 시간 정보 조회 실패:', err);
-    infoTimeEl.textContent = '촬영 시간 정보를 가져오지 못했어요.';
+  // info.js의 getDeviceInfo()는 비동기라 await로 받는다. 결과는 화면에 바로
+  // 채우는 동시에 latestCaptureRecord에도 담아둬서 "저장" 버튼이 그대로 쓸 수 있게 한다.
+  async function fillInfoPanel(canvas, dataUrl) {
+    const record = { dataUrl, timeText: '', deviceText: '', environmentText: '' };
+
+    try {
+      const timeInfo = getTimeInfo();
+      record.timeText = formatTimeInfo(timeInfo);
+    } catch (err) {
+      console.error('촬영 시간 정보 조회 실패:', err);
+      record.timeText = '촬영 시간 정보를 가져오지 못했어요.';
+    }
+    infoTimeEl.textContent = record.timeText;
+
+    try {
+      const deviceInfo = await getDeviceInfo(currentStream);
+      record.deviceText = formatDeviceInfo(deviceInfo);
+    } catch (err) {
+      console.error('기기 정보 조회 실패:', err);
+      record.deviceText = '기기 정보를 가져오지 못했어요.';
+    }
+    infoDeviceEl.textContent = record.deviceText;
+
+    try {
+      const environmentInfo = getEnvironmentInfo(canvas, latestTiltAngle);
+      record.environmentText = formatEnvironmentInfo(environmentInfo);
+    } catch (err) {
+      console.error('촬영 환경 정보 조회 실패:', err);
+      record.environmentText = '촬영 환경 정보를 가져오지 못했어요.';
+    }
+    infoEnvironmentEl.textContent = record.environmentText;
+
+    latestCaptureRecord = record;
+    saveBtn.disabled = false;
+    saveBtn.textContent = '저장';
   }
 
-  try {
-    const deviceInfo = await getDeviceInfo(currentStream); // ← await 추가
-    infoDeviceEl.textContent = formatDeviceInfo(deviceInfo);
-  } catch (err) {
-    console.error('기기 정보 조회 실패:', err);
-    infoDeviceEl.textContent = '기기 정보를 가져오지 못했어요.';
-  }
-
-  try {
-    const environmentInfo = getEnvironmentInfo(canvas, latestTiltAngle);
-    infoEnvironmentEl.textContent = formatEnvironmentInfo(environmentInfo);
-  } catch (err) {
-    console.error('촬영 환경 정보 조회 실패:', err);
-    infoEnvironmentEl.textContent = '촬영 환경 정보를 가져오지 못했어요.';
-  }
-}
   // ---------- info.js 결과 → 한국어 문장 조합 ----------
   function formatTimeInfo(info) {
     const dayPart = info.isDaytime ? '낮' : '밤';
@@ -158,10 +189,10 @@
   }
 
   function formatDeviceInfo(info) {
-  const facing = formatFacingMode(info.facingMode);
-  const model = info.modelLabel ? ` (${info.modelLabel})` : '';
-  return `${info.platformLabel}${model} · ${info.resolution} · ${facing}`;
-}
+    const facing = formatFacingMode(info.facingMode);
+    const model = info.modelLabel ? ` (${info.modelLabel})` : '';
+    return `${info.platformLabel}${model} · ${info.resolution} · ${facing}`;
+  }
 
   function formatFacingMode(facingMode) {
     if (facingMode === 'environment') return '후면 카메라';
@@ -173,6 +204,45 @@
     return `${info.orientation} · ${info.brightnessLevel}(${info.brightnessValue}) · ${info.tiltDescription}`;
   }
 
+  // ---------- 저장 (촬영 기록 누적) ----------
+  function handleSave() {
+    if (!latestCaptureRecord) return;
+
+    savedCaptures.unshift(latestCaptureRecord); // 최신 저장이 목록 맨 위로
+    renderHistory();
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = '저장됨';
+  }
+
+  function renderHistory() {
+    historyCountEl.textContent = String(savedCaptures.length);
+    historyListEl.innerHTML = '';
+
+    savedCaptures.forEach((item) => {
+      const li = document.createElement('li');
+      li.className = 'history-item';
+
+      const img = document.createElement('img');
+      img.className = 'history-item__thumb';
+      img.alt = '저장된 사진';
+      img.src = item.dataUrl;
+
+      const info = document.createElement('div');
+      info.className = 'history-item__info';
+      info.innerHTML = `
+        <p>${item.timeText}</p>
+        <p>${item.deviceText}</p>
+        <p>${item.environmentText}</p>
+      `;
+
+      li.appendChild(img);
+      li.appendChild(info);
+      historyListEl.appendChild(li);
+    });
+  }
+
+  // ---------- 다시 촬영 ----------
   function handleRetake() {
     resultScreen.hidden = true;
     cameraScreen.hidden = false;
@@ -184,8 +254,11 @@
   }
 
   // ---------- 이벤트 바인딩 ----------
+  startBtn.addEventListener('click', handleStart);
   captureBtn.addEventListener('click', handleCapture);
+  saveBtn.addEventListener('click', handleSave);
   retakeBtn.addEventListener('click', handleRetake);
 
-  init();
+  // 카메라 초기화(init)는 더 이상 페이지 로드 시 자동 실행되지 않는다.
+  // 시작 화면의 "촬영 시작" 버튼을 눌러야 handleStart() 안에서 실행된다.
 })();

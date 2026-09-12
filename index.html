@@ -8,8 +8,32 @@
 </head>
 <body>
 
+  <!-- 시작 화면 -->
+  <section id="start-screen" class="screen start-screen">
+    <header class="start-header">
+      <span class="start-header__brand">
+        <span class="start-header__dot"></span>
+        NEWBITONE
+      </span>
+      <span class="start-header__camera-icon" aria-hidden="true">📷</span>
+    </header>
+
+    <div class="start-content">
+      <p class="start-team">뉴비톤 12조</p>
+      <h1 class="start-title">Real Space</h1>
+      <p class="start-subtitle">가이드에 맞춰 공간을 안전히 촬영해 주세요</p>
+
+      <button id="start-btn" class="start-btn">
+        <span class="start-btn__icon" aria-hidden="true">⚙️</span>
+        촬영 시작
+      </button>
+    </div>
+
+    <div class="start-home-indicator" aria-hidden="true"></div>
+  </section>
+
   <!-- 카메라 화면 -->
-  <main id="camera-screen" class="screen">
+  <main id="camera-screen" class="screen" hidden>
 
     <video id="camera-preview" autoplay playsinline muted></video>
 
@@ -66,8 +90,18 @@
         <h3 class="info-card__title">촬영 환경</h3>
         <p id="info-environment" class="info-card__body"></p>
       </div>
-      <button id="retake-btn" class="retake-btn">다시 촬영</button>
+
+      <div class="result-actions">
+        <button id="save-btn" class="save-btn">저장</button>
+        <button id="retake-btn" class="retake-btn">다시 촬영</button>
+      </div>
     </div>
+
+    <!-- 저장된 촬영을 계속 나열하는 목록 -->
+    <section id="history-section" class="history-section">
+      <h2 class="history-title">저장된 촬영 (<span id="history-count">0</span>)</h2>
+      <ul id="history-list" class="history-list"></ul>
+    </section>
 
   </section>
 
