@@ -254,11 +254,11 @@ function getEnvironmentInfo(canvas, tiltAngleDeg) {
     brightnessValue = _computeAverageBrightness(canvas);
     if (brightnessValue !== null) {
       if (brightnessValue < INFO_CONFIG.BRIGHTNESS_DARK_MAX) {
-        brightnessLevel = '어두움';
+        brightnessLevel = '밝기 어두움';
       } else if (brightnessValue > INFO_CONFIG.BRIGHTNESS_BRIGHT_MIN) {
-        brightnessLevel = '밝음';
+        brightnessLevel = '밝기 밝음';
       } else {
-        brightnessLevel = '보통';
+        brightnessLevel = '밝기 보통';
       }
     }
   }
