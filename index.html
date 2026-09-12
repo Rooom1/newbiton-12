@@ -108,6 +108,11 @@
   <!-- 캡처용 오프스크린 캔버스 (화면에 표시하지 않음) -->
   <canvas id="capture-canvas" hidden></canvas>
 
+  <!-- Firebase (공유 갤러리용, Realtime Database) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+  <script src="firebase-init.js"></script>
+
   <!-- 인터페이스 계약을 지키는 모듈들: 실제 구현이 완성되면 이 두 줄만 교체하면 됨 -->
   <script src="camera.js"></script>
   <script src="info.js"></script>

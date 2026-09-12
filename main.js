@@ -47,8 +47,21 @@
   let latestTiltAngle = 90; // camera.js가 보내주는 최신 기울기 각도(도)
   let currentStream = null; // getDeviceInfo(stream)에 넘길 현재 카메라 스트림
 
-  let latestCaptureRecord = null; // 방금 찍은 사진의 저장 대기 중인 정보
-  let savedCaptures = []; // 저장 버튼을 눌러 확정된 촬영 기록 목록
+  let latestCaptureRecord = null; // 방금 찍은 사진의 저장 대기 중인 정보 (Firestore에 저장할 압축 사진 포함)
+
+  // 촬영된 캔버스를 작게 축소해 JPEG로 압축한다 (Firestore 문서 1MB 제한을 넉넉히 피하기 위함).
+  function toCompressedDataUrl(canvas, maxWidth, quality) {
+    maxWidth = maxWidth || 800;
+    quality = quality || 0.7;
+    const scale = Math.min(1, maxWidth / canvas.width);
+    const w = Math.round(canvas.width * scale);
+    const h = Math.round(canvas.height * scale);
+    const small = document.createElement('canvas');
+    small.width = w;
+    small.height = h;
+    small.getContext('2d').drawImage(canvas, 0, 0, w, h);
+    return small.toDataURL('image/jpeg', quality);
+  }
 
   // ---------- 시작 화면 ----------
   async function handleStart() {
@@ -148,7 +161,8 @@
   // info.js의 getDeviceInfo()는 비동기라 await로 받는다. 결과는 화면에 바로
   // 채우는 동시에 latestCaptureRecord에도 담아둬서 "저장" 버튼이 그대로 쓸 수 있게 한다.
   async function fillInfoPanel(canvas, dataUrl) {
-    const record = { dataUrl, timeText: '', deviceText: '', environmentText: '' };
+    // 갤러리/DB 저장용으로는 압축된 사진을 쓰고, 결과 화면 큰 미리보기는 원본 dataUrl을 그대로 쓴다.
+    const record = { dataUrl: toCompressedDataUrl(canvas), timeText: '', deviceText: '', environmentText: '' };
 
     try {
       const timeInfo = getTimeInfo();
@@ -204,22 +218,59 @@
     return `${info.orientation} · ${info.brightnessLevel}(${info.brightnessValue}) · ${info.tiltDescription}`;
   }
 
-  // ---------- 저장 (촬영 기록 누적) ----------
-  function handleSave() {
+  // ---------- 저장 (Realtime Database에 기록 → 모두가 보는 공유 갤러리) ----------
+  async function handleSave() {
     if (!latestCaptureRecord) return;
-
-    savedCaptures.unshift(latestCaptureRecord); // 최신 저장이 목록 맨 위로
-    renderHistory();
+    if (!window.db) {
+      console.error('Realtime Database가 초기화되지 않았습니다. firebase-init.js의 설정을 확인하세요.');
+      saveBtn.textContent = '저장 실패 (설정 확인)';
+      return;
+    }
 
     saveBtn.disabled = true;
-    saveBtn.textContent = '저장됨';
+    saveBtn.textContent = '저장 중...';
+
+    try {
+      await window.db.ref('captures').push({
+        dataUrl: latestCaptureRecord.dataUrl,
+        timeText: latestCaptureRecord.timeText,
+        deviceText: latestCaptureRecord.deviceText,
+        environmentText: latestCaptureRecord.environmentText,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+      });
+      saveBtn.textContent = '저장됨';
+      // 목록 자체는 subscribeToHistory()의 실시간 구독이 자동으로 갱신해준다.
+    } catch (err) {
+      console.error('저장 실패:', err);
+      saveBtn.disabled = false;
+      saveBtn.textContent = '저장 실패, 다시 시도';
+    }
   }
 
-  function renderHistory() {
-    historyCountEl.textContent = String(savedCaptures.length);
+  // Realtime Database의 captures 목록을 실시간 구독한다.
+  // 누군가 저장할 때마다(같은 URL에 접속한 다른 사람 포함) 목록이 자동으로 갱신된다.
+  function subscribeToHistory() {
+    if (!window.db) return;
+    const capturesRef = window.db.ref('captures').orderByChild('createdAt').limitToLast(50);
+    capturesRef.on(
+      'value',
+      (snapshot) => {
+        const items = [];
+        snapshot.forEach((child) => {
+          items.push(child.val());
+        });
+        items.reverse(); // 최신 저장이 목록 맨 위로 오도록
+        renderHistory(items);
+      },
+      (err) => console.error('공유 갤러리 구독 실패:', err)
+    );
+  }
+
+  function renderHistory(items) {
+    historyCountEl.textContent = String(items.length);
     historyListEl.innerHTML = '';
 
-    savedCaptures.forEach((item) => {
+    items.forEach((item) => {
       const li = document.createElement('li');
       li.className = 'history-item';
 
@@ -258,6 +309,9 @@
   captureBtn.addEventListener('click', handleCapture);
   saveBtn.addEventListener('click', handleSave);
   retakeBtn.addEventListener('click', handleRetake);
+
+  // 공유 갤러리 구독은 페이지가 열리자마자 시작한다 (카메라 권한과는 무관).
+  subscribeToHistory();
 
   // 카메라 초기화(init)는 더 이상 페이지 로드 시 자동 실행되지 않는다.
   // 시작 화면의 "촬영 시작" 버튼을 눌러야 handleStart() 안에서 실행된다.
