@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>왜곡 방지 촬영 - 뉴비톤 주거</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 카메라 화면 -->
+  <main id="camera-screen" class="screen">
+
+    <video id="camera-preview" autoplay playsinline muted></video>
+
+    <!-- 정렬 가이드라인 오버레이 -->
+    <div class="guide-overlay" aria-hidden="true">
+      <div class="guide-line guide-line--left"></div>
+      <div class="guide-line guide-line--right"></div>
+      <p class="guide-hint">벽 모서리를 좌우 점선에 맞춰주세요</p>
+    </div>
+
+    <!-- 상단 경고 배너 -->
+    <div id="tilt-warning" class="tilt-warning" hidden>
+      <span id="tilt-warning-text">카메라를 수평으로 맞춰주세요</span>
+      <span id="tilt-angle" class="tilt-angle"></span>
+    </div>
+
+    <!-- 카메라 에러 안내 -->
+    <div id="camera-error" class="camera-error" hidden>
+      <p>카메라에 접근할 수 없습니다. 브라우저 권한을 확인해주세요.</p>
+    </div>
+
+    <!-- iOS 등 기울기 센서 권한이 필요한 경우에만 노출 -->
+    <button id="tilt-permission-btn" class="tilt-permission-btn" hidden>
+      기울기 센서 권한 허용
+    </button>
+
+    <!-- 하단 촬영 컨트롤 -->
+    <div class="capture-bar">
+      <button id="capture-btn" class="capture-btn" disabled aria-label="촬영">
+        <span class="capture-btn__ring"></span>
+      </button>
+      <p id="capture-hint" class="capture-hint">기울기를 확인하는 중...</p>
+    </div>
+
+  </main>
+
+  <!-- 결과 화면 -->
+  <section id="result-screen" class="screen result-screen" hidden>
+
+    <div class="result-photo-wrap">
+      <img id="result-photo" alt="촬영된 사진" />
+    </div>
+
+    <div id="result-panel" class="result-panel" hidden>
+      <div class="info-card" id="info-time-card">
+        <h3 class="info-card__title">촬영 시간</h3>
+        <p id="info-time" class="info-card__body"></p>
+      </div>
+      <div class="info-card" id="info-device-card">
+        <h3 class="info-card__title">기기 정보</h3>
+        <p id="info-device" class="info-card__body"></p>
+      </div>
+      <div class="info-card" id="info-environment-card">
+        <h3 class="info-card__title">촬영 환경</h3>
+        <p id="info-environment" class="info-card__body"></p>
+      </div>
+      <button id="retake-btn" class="retake-btn">다시 촬영</button>
+    </div>
+
+  </section>
+
+  <!-- 캡처용 오프스크린 캔버스 (화면에 표시하지 않음) -->
+  <canvas id="capture-canvas" hidden></canvas>
+
+  <!-- 인터페이스 계약을 지키는 모듈들: 실제 구현이 완성되면 이 두 줄만 교체하면 됨 -->
+  <script src="camera.js"></script>
+  <script src="info.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
