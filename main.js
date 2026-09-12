@@ -99,23 +99,23 @@
   }
 
   // ---------- 촬영 ----------
-  function handleCapture() {
-    if (captureBtn.disabled) return;
+  async function handleCapture() {
+  if (captureBtn.disabled) return;
 
-    captureBtn.disabled = true;
+  captureBtn.disabled = true;
 
-    let dataUrl, canvas;
-    try {
-      ({ dataUrl, canvas } = capturePhoto(videoEl));
-    } catch (err) {
-      console.error('촬영 실패:', err);
-      captureBtn.disabled = !latestIsSafe;
-      return;
-    }
-
-    showResultScreen(dataUrl);
-    fillInfoPanel(canvas);
+  let dataUrl, canvas;
+  try {
+    ({ dataUrl, canvas } = capturePhoto(videoEl));
+  } catch (err) {
+    console.error('촬영 실패:', err);
+    captureBtn.disabled = !latestIsSafe;
+    return;
   }
+
+  showResultScreen(dataUrl);
+  await fillInfoPanel(canvas); // ← await 추가 (필수는 아니지만 흐름이 명확해짐)
+}
 
   function showResultScreen(dataUrl) {
     resultPhotoEl.src = dataUrl;
@@ -126,32 +126,31 @@
   }
 
   // info.js의 세 함수는 모두 동기 함수라 로딩 스피너 없이 바로 결과를 채운다.
-  function fillInfoPanel(canvas) {
-    try {
-      const timeInfo = getTimeInfo();
-      infoTimeEl.textContent = formatTimeInfo(timeInfo);
-    } catch (err) {
-      console.error('촬영 시간 정보 조회 실패:', err);
-      infoTimeEl.textContent = '촬영 시간 정보를 가져오지 못했어요.';
-    }
-
-    try {
-      const deviceInfo = getDeviceInfo(currentStream);
-      infoDeviceEl.textContent = formatDeviceInfo(deviceInfo);
-    } catch (err) {
-      console.error('기기 정보 조회 실패:', err);
-      infoDeviceEl.textContent = '기기 정보를 가져오지 못했어요.';
-    }
-
-    try {
-      const environmentInfo = getEnvironmentInfo(canvas, latestTiltAngle);
-      infoEnvironmentEl.textContent = formatEnvironmentInfo(environmentInfo);
-    } catch (err) {
-      console.error('촬영 환경 정보 조회 실패:', err);
-      infoEnvironmentEl.textContent = '촬영 환경 정보를 가져오지 못했어요.';
-    }
+  async function fillInfoPanel(canvas) {
+  try {
+    const timeInfo = getTimeInfo();
+    infoTimeEl.textContent = formatTimeInfo(timeInfo);
+  } catch (err) {
+    console.error('촬영 시간 정보 조회 실패:', err);
+    infoTimeEl.textContent = '촬영 시간 정보를 가져오지 못했어요.';
   }
 
+  try {
+    const deviceInfo = await getDeviceInfo(currentStream); // ← await 추가
+    infoDeviceEl.textContent = formatDeviceInfo(deviceInfo);
+  } catch (err) {
+    console.error('기기 정보 조회 실패:', err);
+    infoDeviceEl.textContent = '기기 정보를 가져오지 못했어요.';
+  }
+
+  try {
+    const environmentInfo = getEnvironmentInfo(canvas, latestTiltAngle);
+    infoEnvironmentEl.textContent = formatEnvironmentInfo(environmentInfo);
+  } catch (err) {
+    console.error('촬영 환경 정보 조회 실패:', err);
+    infoEnvironmentEl.textContent = '촬영 환경 정보를 가져오지 못했어요.';
+  }
+}
   // ---------- info.js 결과 → 한국어 문장 조합 ----------
   function formatTimeInfo(info) {
     const dayPart = info.isDaytime ? '낮' : '밤';
@@ -159,9 +158,10 @@
   }
 
   function formatDeviceInfo(info) {
-    const facing = formatFacingMode(info.facingMode);
-    return `${info.platformLabel} · ${info.resolution} · ${facing}`;
-  }
+  const facing = formatFacingMode(info.facingMode);
+  const model = info.modelLabel ? ` (${info.modelLabel})` : '';
+  return `${info.platformLabel}${model} · ${info.resolution} · ${facing}`;
+}
 
   function formatFacingMode(facingMode) {
     if (facingMode === 'environment') return '후면 카메라';
