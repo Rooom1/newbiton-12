@@ -1,8 +1,13 @@
 /**
  * main.js — 통합/UI 담당(담당 3) 산출물
  *
- * camera.js / distortion.js의 공개 함수만 사용해서 화면 흐름을 구성한다.
+ * camera.js / info.js의 공개 함수만 사용해서 화면 흐름을 구성한다.
  * 두 파일이 실제 구현으로 교체되어도 이 파일은 수정할 필요가 없어야 한다.
+ *
+ * 왜곡 점수(distortion.js) 기능은 실제 환경에서 동작하지 않아 제거되었고,
+ * 대신 촬영 직후 촬영 시간/기기 정보/촬영 환경을 보여주는 info.js로 대체되었다.
+ * info.js의 세 함수(getTimeInfo, getDeviceInfo, getEnvironmentInfo)는 모두
+ * 동기 함수이므로 별도의 "분석 중" 로딩 상태가 필요 없다.
  */
 
 (function () {
@@ -22,20 +27,21 @@
   const cameraScreen = document.getElementById('camera-screen');
   const resultScreen = document.getElementById('result-screen');
   const resultPhotoEl = document.getElementById('result-photo');
-  const resultAnalyzingEl = document.getElementById('result-analyzing');
   const resultPanelEl = document.getElementById('result-panel');
-  const resultVerdictEl = document.getElementById('result-verdict');
-  const resultVerdictLabelEl = document.getElementById('result-verdict-label');
-  const resultScoreEl = document.getElementById('result-score');
-  const resultNoteEl = document.getElementById('result-note');
+  const infoTimeEl = document.getElementById('info-time');
+  const infoDeviceEl = document.getElementById('info-device');
+  const infoEnvironmentEl = document.getElementById('info-environment');
   const retakeBtn = document.getElementById('retake-btn');
 
   // ---------- 상태 ----------
   let latestIsSafe = false;
+  let latestTiltAngle = 90; // camera.js가 보내주는 최신 기울기 각도(도)
+  let currentStream = null; // getDeviceInfo(stream)에 넘길 현재 카메라 스트림
 
   // ---------- 기울기 UI 갱신 ----------
   function handleTiltUpdate(angleDeg, isSafe) {
     latestIsSafe = isSafe;
+    latestTiltAngle = angleDeg;
 
     tiltWarningEl.hidden = isSafe;
     if (!isSafe) {
@@ -61,7 +67,7 @@
   // ---------- 초기화: 카메라 + 기울기 모니터링 ----------
   async function init() {
     try {
-      await initCamera(videoEl);
+      currentStream = await initCamera(videoEl);
     } catch (err) {
       console.error('카메라 초기화 실패:', err);
       cameraErrorEl.hidden = false;
@@ -93,7 +99,7 @@
   }
 
   // ---------- 촬영 ----------
-  async function handleCapture() {
+  function handleCapture() {
     if (captureBtn.disabled) return;
 
     captureBtn.disabled = true;
@@ -108,61 +114,63 @@
     }
 
     showResultScreen(dataUrl);
-
-    try {
-      // analyzeDistortion은 비동기(Promise) 계약이므로 반드시 await로 받는다.
-      const result = await analyzeDistortion(canvas);
-      showAnalysisResult(result);
-    } catch (err) {
-      console.error('왜곡 분석 실패:', err);
-      showAnalysisError();
-    }
+    fillInfoPanel(canvas);
   }
 
   function showResultScreen(dataUrl) {
     resultPhotoEl.src = dataUrl;
-    resultPanelEl.hidden = true;
-    resultAnalyzingEl.hidden = false;
-    resultNoteEl.hidden = true;
+    resultPanelEl.hidden = false;
 
     cameraScreen.hidden = true;
     resultScreen.hidden = false;
   }
 
-  function showAnalysisResult(result) {
-    const { score, verdict, details } = result;
-
-    resultAnalyzingEl.hidden = true;
-    resultPanelEl.hidden = false;
-
-    resultScoreEl.textContent = Math.round(score);
-
-    resultVerdictEl.classList.remove('pass', 'retake');
-    if (verdict === 'pass') {
-      resultVerdictEl.classList.add('pass');
-      resultVerdictLabelEl.textContent = '통과';
-    } else {
-      resultVerdictEl.classList.add('retake');
-      resultVerdictLabelEl.textContent = '재촬영 필요';
+  // info.js의 세 함수는 모두 동기 함수라 로딩 스피너 없이 바로 결과를 채운다.
+  function fillInfoPanel(canvas) {
+    try {
+      const timeInfo = getTimeInfo();
+      infoTimeEl.textContent = formatTimeInfo(timeInfo);
+    } catch (err) {
+      console.error('촬영 시간 정보 조회 실패:', err);
+      infoTimeEl.textContent = '촬영 시간 정보를 가져오지 못했어요.';
     }
 
-    if (details && details.confidence === 'low') {
-      resultNoteEl.hidden = false;
-      resultNoteEl.textContent =
-        '벽선이 뚜렷하지 않아 신뢰도가 낮은 결과예요. 참고용으로만 확인해주세요.';
-    } else {
-      resultNoteEl.hidden = true;
+    try {
+      const deviceInfo = getDeviceInfo(currentStream);
+      infoDeviceEl.textContent = formatDeviceInfo(deviceInfo);
+    } catch (err) {
+      console.error('기기 정보 조회 실패:', err);
+      infoDeviceEl.textContent = '기기 정보를 가져오지 못했어요.';
+    }
+
+    try {
+      const environmentInfo = getEnvironmentInfo(canvas, latestTiltAngle);
+      infoEnvironmentEl.textContent = formatEnvironmentInfo(environmentInfo);
+    } catch (err) {
+      console.error('촬영 환경 정보 조회 실패:', err);
+      infoEnvironmentEl.textContent = '촬영 환경 정보를 가져오지 못했어요.';
     }
   }
 
-  function showAnalysisError() {
-    resultAnalyzingEl.hidden = true;
-    resultPanelEl.hidden = false;
-    resultScoreEl.textContent = '-';
-    resultVerdictEl.classList.remove('pass', 'retake');
-    resultVerdictLabelEl.textContent = '분석 실패';
-    resultNoteEl.hidden = false;
-    resultNoteEl.textContent = '왜곡 분석 중 오류가 발생했습니다. 다시 촬영해주세요.';
+  // ---------- info.js 결과 → 한국어 문장 조합 ----------
+  function formatTimeInfo(info) {
+    const dayPart = info.isDaytime ? '낮' : '밤';
+    return `${info.displayTime} · ${dayPart}`;
+  }
+
+  function formatDeviceInfo(info) {
+    const facing = formatFacingMode(info.facingMode);
+    return `${info.platformLabel} · ${info.resolution} · ${facing}`;
+  }
+
+  function formatFacingMode(facingMode) {
+    if (facingMode === 'environment') return '후면 카메라';
+    if (facingMode === 'user') return '전면 카메라';
+    return facingMode || '카메라 방향 불명';
+  }
+
+  function formatEnvironmentInfo(info) {
+    return `${info.orientation} · ${info.brightnessLevel}(${info.brightnessValue}) · ${info.tiltDescription}`;
   }
 
   function handleRetake() {
